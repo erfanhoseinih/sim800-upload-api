@@ -1,74 +1,72 @@
-const express = require("express");
+module.exports = async (req, res) => {
+  try {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const pathname = url.pathname;
 
-const app = express();
-
-const MAX_SIZE_BYTES = 2 * 1024 * 1024;
-
-// صفحه اصلی
-app.get("/", (req, res) => {
-  res.json({
-    ok: true,
-    service: "SIM800L Upload API on Vercel",
-    endpoints: {
-      ping: "GET /api/ping",
-      uploadRaw: "POST /api/upload-raw?name=test.txt"
-    }
-  });
-});
-
-// تست سلامت
-app.get("/ping", (req, res) => {
-  res.json({
-    ok: true,
-    message: "pong",
-    time: new Date().toISOString()
-  });
-});
-
-// دریافت خام مناسب SIM800L
-app.post("/upload-raw", (req, res) => {
-  let receivedBytes = 0;
-  const chunks = [];
-
-  req.on("data", (chunk) => {
-    receivedBytes += chunk.length;
-
-    if (receivedBytes > MAX_SIZE_BYTES) {
-      return res.status(413).json({
-        ok: false,
-        error: "Payload too large"
+    // GET /api/ping
+    if (req.method === "GET" && pathname === "/api/ping") {
+      return res.status(200).json({
+        ok: true,
+        message: "pong",
+        time: new Date().toISOString()
       });
     }
 
-    chunks.push(chunk);
-  });
+    // GET /api
+    if (req.method === "GET" && (pathname === "/api" || pathname === "/api/")) {
+      return res.status(200).json({
+        ok: true,
+        service: "SIM800L Upload API on Vercel",
+        endpoints: {
+          ping: "GET /api/ping",
+          uploadRaw: "POST /api/upload-raw?name=test.txt"
+        }
+      });
+    }
 
-  req.on("end", () => {
-    const buffer = Buffer.concat(chunks);
+    // POST /api/upload-raw
+    if (req.method === "POST" && pathname === "/api/upload-raw") {
+      const chunks = [];
+      let total = 0;
+      const MAX_SIZE_BYTES = 2 * 1024 * 1024;
 
-    const filename = req.query.name || `raw_${Date.now()}.bin`;
+      await new Promise((resolve, reject) => {
+        req.on("data", (chunk) => {
+          total += chunk.length;
 
-    console.log("Raw upload received:", {
-      filename,
-      size: receivedBytes,
-      preview: buffer.slice(0, 100).toString("hex")
-    });
+          if (total > MAX_SIZE_BYTES) {
+            reject(new Error("Payload too large"));
+            return;
+          }
 
-    res.json({
-      ok: true,
-      message: "raw data received",
-      filename,
-      size: receivedBytes,
-      time: new Date().toISOString()
-    });
-  });
+          chunks.push(chunk);
+        });
 
-  req.on("error", (err) => {
-    res.status(500).json({
+        req.on("end", resolve);
+        req.on("error", reject);
+      });
+
+      const filename = url.searchParams.get("name") || `raw_${Date.now()}.bin`;
+
+      return res.status(200).json({
+        ok: true,
+        message: "raw data received",
+        filename,
+        size: total,
+        time: new Date().toISOString()
+      });
+    }
+
+    return res.status(404).json({
       ok: false,
-      error: err.message
+      error: "Not found",
+      path: pathname,
+      method: req.method
     });
-  });
-});
-
-module.exports = app;
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err.message || "Internal server error"
+    });
+  }
+};
